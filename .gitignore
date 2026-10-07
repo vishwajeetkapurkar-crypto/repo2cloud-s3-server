@@ -1,0 +1,65 @@
+HELP.md
+target/
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+# ==========================================================
+# Repo2Cloud S3 Server
+# ==========================================================
+
+# Local object storage
+s3-storage/
+
+# Logs
+*.log
+
+# Environment variables / local secrets
+.env
+.env.*
+application-local.properties
+application-local.yml
+
+# Java compiled files
+*.class
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# Local Spring configuration containing credentials
+src/main/resources/application.properties
+
+# Local S3 object storage
+s3-storage/
