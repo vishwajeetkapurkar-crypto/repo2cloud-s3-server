@@ -3,6 +3,9 @@ package com.repo2cloud.s3server.storage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.Comparator;
+import java.util.stream.Stream;
+
 import com.repo2cloud.s3server.exception.InvalidBucketNameException;
 import com.repo2cloud.s3server.exception.InvalidObjectKeyException;
 import com.repo2cloud.s3server.util.ETagUtil;
@@ -174,6 +177,41 @@ public void deleteBackup(Path backupPath) {
     } catch (IOException e) {
         throw new RuntimeException(
                 "Could not delete object backup",
+                e
+        );
+    }
+}
+
+public void deleteBucket(String bucketName) {
+    try {
+        Path bucketPath = rootLocation.resolve(bucketName).normalize();
+
+        if (!bucketPath.startsWith(rootLocation)) {
+            throw new InvalidBucketNameException(bucketName);
+        }
+
+        if (!Files.exists(bucketPath)) {
+            return;
+        }
+
+        try (Stream<Path> paths = Files.walk(bucketPath)) {
+            paths
+                    .sorted(Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            throw new RuntimeException(
+                                    "Could not delete bucket storage: " + bucketName,
+                                    e
+                            );
+                        }
+                    });
+        }
+
+    } catch (IOException e) {
+        throw new RuntimeException(
+                "Could not delete bucket storage: " + bucketName,
                 e
         );
     }

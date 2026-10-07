@@ -8,6 +8,8 @@ import com.repo2cloud.s3server.exception.BucketNotFoundException;
 import com.repo2cloud.s3server.exception.InvalidBucketNameException;
 import com.repo2cloud.s3server.repository.BucketRepository;
 import com.repo2cloud.s3server.repository.StoredObjectRepository;
+import com.repo2cloud.s3server.storage.LocalFileStorage;
+
 import org.springframework.stereotype.Service;
 import com.repo2cloud.s3server.validation.BucketNameValidator;
 
@@ -17,15 +19,17 @@ import java.util.List;
 @Service
 public class BucketService {
     private final StoredObjectRepository storedObjectRepository;
-
+    private final LocalFileStorage localFileStorage;
     private final BucketRepository bucketRepository;
 
    public BucketService(
         BucketRepository bucketRepository,
-        StoredObjectRepository storedObjectRepository) {
+        StoredObjectRepository storedObjectRepository,
+        LocalFileStorage localFileStorage) {
 
     this.bucketRepository = bucketRepository;
     this.storedObjectRepository = storedObjectRepository;
+    this.localFileStorage = localFileStorage;
 }
 
     public Bucket createBucket(String name) {
@@ -77,6 +81,7 @@ public class BucketService {
     }
 
     bucketRepository.delete(bucket);
+localFileStorage.deleteBucket(name);
 }
 
 }
