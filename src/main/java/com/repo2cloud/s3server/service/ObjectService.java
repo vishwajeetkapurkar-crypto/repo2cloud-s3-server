@@ -1,4 +1,5 @@
 package com.repo2cloud.s3server.service;
+import java.util.UUID;
 
 import com.repo2cloud.s3server.dto.CommonPrefix;
 import com.repo2cloud.s3server.dto.ListObjectsResponse;
@@ -12,8 +13,7 @@ import com.repo2cloud.s3server.exception.InvalidObjectKeyException;
 import com.repo2cloud.s3server.exception.ObjectNotFoundException;
 import com.repo2cloud.s3server.repository.BucketRepository;
 import com.repo2cloud.s3server.repository.StoredObjectRepository;
-import com.repo2cloud.s3server.storage.LocalFileStorage;
-import com.repo2cloud.s3server.storage.StreamingUploadResult;
+import com.repo2cloud.s3server.storage.MinioObjectStorage;
 import com.repo2cloud.s3server.validation.ObjectKeyValidator;
 
 import org.springframework.core.io.InputStreamResource;
@@ -22,7 +22,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.InputStream;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -32,23 +31,28 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 @Service
 public class ObjectService {
 
+        private static final Logger log =
+        LoggerFactory.getLogger(ObjectService.class);
+
     private final BucketRepository bucketRepository;
-    private final StoredObjectRepository storedObjectRepository;
-    private final LocalFileStorage localFileStorage;
+private final StoredObjectRepository storedObjectRepository;
+private final MinioObjectStorage minioObjectStorage;
 
-    public ObjectService(
-            BucketRepository bucketRepository,
-            StoredObjectRepository storedObjectRepository,
-            LocalFileStorage localFileStorage) {
+   public ObjectService(
+        BucketRepository bucketRepository,
+        StoredObjectRepository storedObjectRepository,
+        MinioObjectStorage minioObjectStorage) {
 
-        this.bucketRepository = bucketRepository;
-        this.storedObjectRepository = storedObjectRepository;
-        this.localFileStorage = localFileStorage;
-    }
-
+    this.bucketRepository = bucketRepository;
+    this.storedObjectRepository = storedObjectRepository;
+    this.minioObjectStorage = minioObjectStorage;
+}
     // ============================================================
     // GET OBJECT
     // ============================================================
@@ -78,14 +82,11 @@ public class ObjectService {
                                 )
                         );
 
-        Path objectPath = Path.of(
-                storedObject.getStoragePath()
-        );
-
         InputStream inputStream =
-                localFileStorage.getObjectStream(
-                        objectPath
-                );
+        minioObjectStorage.getObject(
+                bucket.getId(),
+                storedObject.getObjectKey()
+        );
 
         InputStreamResource resource =
                 new InputStreamResource(inputStream);
@@ -131,41 +132,49 @@ public class ObjectService {
     // DELETE OBJECT
     // ============================================================
 
-    public void deleteObject(
-            Long ownerId,
-            String bucketName,
-            String objectKey) {
+    // ============================================================
+// DELETE OBJECT
+// ============================================================
 
-        ownerId = validateOwnerId(ownerId);
-        Bucket bucket = bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
-                .orElseThrow(() ->
-                        new BucketNotFoundException(
-                                "Bucket not found: " + bucketName
-                        )
-                );
+public void deleteObject(
+        Long ownerId,
+        String bucketName,
+        String objectKey) {
 
-        StoredObject storedObject =
-                storedObjectRepository
-                        .findByBucketIdAndObjectKey(
-                                bucket.getId(),
-                                objectKey
-                        )
-                        .orElseThrow(() ->
-                                new ObjectNotFoundException(
-                                        "Object not found: " + objectKey
-                                )
-                        );
+    // 1. Validate the owner ID.
+    ownerId = validateOwnerId(ownerId);
 
-        Path objectPath = Path.of(
-                storedObject.getStoragePath()
-        );
+    // 2. Find the bucket belonging to this owner.
+    Bucket bucket = bucketRepository
+            .findByNameAndOwnerId(bucketName, ownerId)
+            .orElseThrow(() ->
+                    new BucketNotFoundException(
+                            "Bucket not found: " + bucketName
+                    )
+            );
 
-        // Delete actual file
-        localFileStorage.deleteObject(objectPath);
+    // 3. Look for the object's metadata in MySQL.
+    Optional<StoredObject> storedObject =
+            storedObjectRepository.findByBucketIdAndObjectKey(
+                    bucket.getId(),
+                    objectKey
+            );
 
-        // Delete metadata
-        storedObjectRepository.delete(storedObject);
+    // 4. If the object doesn't exist, do nothing.
+    // S3-compatible DeleteObject should still succeed.
+    if (storedObject.isEmpty()) {
+        return;
     }
+
+    // 5. Delete the actual object from MinIO.
+    minioObjectStorage.deleteObject(
+            bucket.getId(),
+            storedObject.get().getObjectKey()
+    );
+
+    // 6. Remove its metadata from MySQL.
+    storedObjectRepository.delete(storedObject.get());
+}
 
     // ============================================================
     // LIST OBJECTS
@@ -438,17 +447,13 @@ public class ObjectService {
                                 )
                         );
 
-        Path objectPath =
-                Path.of(
-                        storedObject.getStoragePath()
-                );
-
         InputStream inputStream =
-                localFileStorage.getObjectRangeStream(
-                        objectPath,
-                        start,
-                        length
-                );
+        minioObjectStorage.getObjectRange(
+                bucket.getId(),
+                storedObject.getObjectKey(),
+                start,
+                length
+        );
 
         InputStreamResource resource =
                 new InputStreamResource(inputStream);
@@ -465,190 +470,81 @@ public class ObjectService {
     // UPLOAD OBJECT
     // ============================================================
 
-    public StoredObject uploadObject(
-            Long ownerId,
-            String bucketName,
-            String objectKey,
-            InputStream inputStream,
-            String contentType) {
+public StoredObject uploadObject(
+        Long ownerId,
+        String bucketName,
+        String objectKey,
+        InputStream inputStream,
+        String contentType) {
 
-        ownerId = validateOwnerId(ownerId);
-        /*
-         * Validate object key before doing any filesystem
-         * or database operation.
-         */
-        if (!ObjectKeyValidator.isValid(objectKey)) {
+    ownerId = validateOwnerId(ownerId);
 
-            throw new InvalidObjectKeyException(
-                    bucketName,
-                    objectKey
-            );
-        }
-
-        /*
-         * Make sure bucket exists.
-         */
-        Bucket bucket =
-                bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
-                        .orElseThrow(() ->
-                                new BucketNotFoundException(
-                                        "Bucket not found: "
-                                                + bucketName
-                                )
-                        );
-
-        /*
-         * Check whether this is a new object or an overwrite.
-         */
-        Optional<StoredObject> existingObject =
-                storedObjectRepository
-                        .findByBucketIdAndObjectKey(
-                                bucket.getId(),
-                                objectKey
-                        );
-
-        // ========================================================
-        // EXISTING OBJECT -> OVERWRITE
-        // ========================================================
-
-        if (existingObject.isPresent()) {
-
-            StoredObject storedObject =
-                    existingObject.get();
-
-            /*
-             * Keep a backup of the old physical file.
-             *
-             * If the database update fails after the new file
-             * has been written, we can restore the old file.
-             */
-            Path oldObjectPath =
-                    Path.of(
-                            storedObject.getStoragePath()
-                    );
-
-            Path backupPath =
-                    localFileStorage.backupObject(
-                            oldObjectPath
-                    );
-
-            StreamingUploadResult uploadResult;
-
-            try {
-
-                /*
-                 * Save the new file.
-                 *
-                 * LocalFileStorage already writes to a temporary
-                 * file and atomically replaces the target.
-                 */
-                uploadResult =
-        localFileStorage.saveObject(
-                bucket.getId().toString(),
-                objectKey,
-                inputStream
-        );
-
-                /*
-                 * Update metadata.
-                 */
-                storedObject.setFileName(
-                        objectKey.substring(
-                                objectKey.lastIndexOf("/") + 1
-                        )
-                );
-
-                storedObject.setContentType(
-                        contentType != null
-                                ? contentType
-                                : "application/octet-stream"
-                );
-
-                storedObject.setSize(
-                        uploadResult.getSize()
-                );
-
-                storedObject.setStoragePath(
-                        uploadResult
-                                .getStoragePath()
-                                .toString()
-                );
-
-                storedObject.setEtag(
-                        uploadResult.getEtag()
-                );
-
-                storedObject.setCreatedAt(
-                        LocalDateTime.now()
-                );
-
-                /*
-                 * Save metadata.
-                 */
-                StoredObject savedObject =
-        storedObjectRepository.saveAndFlush(
-                storedObject
-        );
-
-                /*
-                 * Database update succeeded.
-                 * Old backup is no longer required.
-                 */
-                localFileStorage.deleteBackup(
-                        backupPath
-                );
-
-                return savedObject;
-
-            } catch (Exception e) {
-
-                /*
-                 * Something failed while replacing the object.
-                 *
-                 * Restore the previous physical file so that
-                 * filesystem and metadata remain consistent.
-                 */
-                try {
-
-                    localFileStorage.restoreBackup(
-                            backupPath,
-                            oldObjectPath
-                    );
-
-                } catch (Exception restoreException) {
-
-                    /*
-                     * Preserve the original exception while
-                     * keeping the restore failure as context.
-                     */
-                    e.addSuppressed(
-                            restoreException
-                    );
-                }
-
-                throw e;
-            }
-        }
-
-        // ========================================================
-        // NEW OBJECT
-        // ========================================================
-
-        StreamingUploadResult uploadResult =
-                localFileStorage.saveObject(
-                        bucket.getId().toString(),
-                        objectKey,
-                        inputStream
-                );
-
-        StoredObject storedObject =
-                new StoredObject();
-
-        storedObject.setBucket(bucket);
-
-        storedObject.setObjectKey(
+    // 1. Validate the object key.
+    if (!ObjectKeyValidator.isValid(objectKey)) {
+        throw new InvalidObjectKeyException(
+                bucketName,
                 objectKey
         );
+    }
+
+    // 2. Find the bucket belonging to this owner.
+    Bucket bucket = bucketRepository
+            .findByNameAndOwnerId(bucketName, ownerId)
+            .orElseThrow(() ->
+                    new BucketNotFoundException(
+                            "Bucket not found: " + bucketName
+                    )
+            );
+
+    // 3. Find existing metadata.
+    Optional<StoredObject> existingObject =
+            storedObjectRepository.findByBucketIdAndObjectKey(
+                    bucket.getId(),
+                    objectKey
+            );
+
+    String effectiveContentType =
+            contentType != null && !contentType.isBlank()
+                    ? contentType
+                    : "application/octet-stream";
+
+    // 4. Back up the original object before overwriting it.
+    String backupKey = null;
+    boolean backupCreated = false;
+
+    if (existingObject.isPresent()) {
+        backupKey = ".repo2cloud-internal-backup/"
+                + UUID.randomUUID();
+
+        minioObjectStorage.copyObject(
+                bucket.getId(),
+                objectKey,
+                backupKey
+        );
+
+        backupCreated = true;
+    }
+
+    StoredObject savedObject;
+
+    try {
+        // 5. Upload the new content.
+        MinioObjectStorage.UploadResult uploadResult =
+                minioObjectStorage.uploadObject(
+                        bucket.getId(),
+                        objectKey,
+                        inputStream,
+                        effectiveContentType
+                );
+
+        // 6. Prepare the metadata.
+        StoredObject storedObject =
+                existingObject.orElseGet(StoredObject::new);
+
+        if (existingObject.isEmpty()) {
+            storedObject.setBucket(bucket);
+            storedObject.setObjectKey(objectKey);
+        }
 
         storedObject.setFileName(
                 objectKey.substring(
@@ -656,64 +552,111 @@ public class ObjectService {
                 )
         );
 
-        storedObject.setContentType(
-                contentType != null
-                        ? contentType
-                        : "application/octet-stream"
+        storedObject.setContentType(effectiveContentType);
+        storedObject.setSize(uploadResult.getSize());
+        storedObject.setStoragePath("minio");
+        storedObject.setEtag(uploadResult.getEtag());
+        storedObject.setCreatedAt(LocalDateTime.now());
+
+        // 7. Save metadata to MySQL.
+        savedObject = storedObjectRepository.saveAndFlush(
+                storedObject
         );
 
-        storedObject.setSize(
-                uploadResult.getSize()
-        );
+    } catch (Exception uploadOrDatabaseFailure) {
 
-        storedObject.setStoragePath(
-                uploadResult
-                        .getStoragePath()
-                        .toString()
-        );
-
-        storedObject.setEtag(
-                uploadResult.getEtag()
-        );
-
-        storedObject.setCreatedAt(
-                LocalDateTime.now()
-        );
-
-        try {
-
-            /*
-             * Save metadata.
-             */
-            return storedObjectRepository.save(
-                    storedObject
-            );
-
-        } catch (Exception e) {
-
-            /*
-             * Database save failed.
-             *
-             * Remove the physical file because there is no
-             * valid metadata record for it.
-             */
+        // 8. Restore the original object after any failed overwrite.
+        // Do not depend on uploadObject() having returned successfully.
+        if (backupCreated) {
             try {
-
-                localFileStorage.deleteObject(
-                        uploadResult.getStoragePath()
+                minioObjectStorage.copyObject(
+                        bucket.getId(),
+                        backupKey,
+                        objectKey
                 );
 
-            } catch (Exception cleanupException) {
+            } catch (Exception restoreFailure) {
+                uploadOrDatabaseFailure.addSuppressed(
+                        restoreFailure
+                );
 
-                e.addSuppressed(
-                        cleanupException
+                // Keep the backup for manual recovery.
+                throw new RuntimeException(
+                        "The upload failed and the original object "
+                                + "could not be restored. Preserve and "
+                                + "inspect backup: " + backupKey,
+                        uploadOrDatabaseFailure
                 );
             }
 
-            throw e;
+            // Restoration succeeded. Backup cleanup is best-effort.
+            try {
+                minioObjectStorage.deleteObject(
+                        bucket.getId(),
+                        backupKey
+                );
+
+            } catch (Exception cleanupFailure) {
+                log.warn(
+                        "Original object was restored, but backup "
+                                + "cleanup failed. Backup key: {}",
+                        backupKey,
+                        cleanupFailure
+                );
+            }
+
+        } else if (existingObject.isEmpty()) {
+
+            // For a new object, remove any object that may have been
+            // uploaded before the failure occurred.
+            try {
+                minioObjectStorage.deleteObject(
+                        bucket.getId(),
+                        objectKey
+                );
+
+            } catch (Exception cleanupFailure) {
+                uploadOrDatabaseFailure.addSuppressed(
+                        cleanupFailure
+                );
+
+                log.error(
+                        "Failed to clean up object after upload failure: {}",
+                        objectKey,
+                        cleanupFailure
+                );
+            }
+        }
+
+        throw new RuntimeException(
+                "Object upload or metadata persistence failed: "
+                        + objectKey,
+                uploadOrDatabaseFailure
+        );
+    }
+
+    // 9. The upload and database update succeeded.
+    // Clean up the backup separately so cleanup failure cannot
+    // trigger an unnecessary rollback.
+    if (backupCreated) {
+        try {
+            minioObjectStorage.deleteObject(
+                    bucket.getId(),
+                    backupKey
+            );
+
+        } catch (Exception cleanupFailure) {
+            log.warn(
+                    "Upload succeeded, but backup cleanup failed. "
+                            + "Backup key: {}",
+                    backupKey,
+                    cleanupFailure
+            );
         }
     }
 
+    return savedObject;
+}
     private Long validateOwnerId(Long ownerId) {
         if (ownerId == null || ownerId <= 0) {
             throw new ResponseStatusException(

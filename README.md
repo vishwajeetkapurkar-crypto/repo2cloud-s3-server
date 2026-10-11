@@ -4,6 +4,7 @@ A lightweight, S3-compatible object storage server built with Java and Spring Bo
 
 The server provides REST APIs for storing, retrieving, listing, and deleting objects using S3-style bucket and object operations.
 
+<<<<<<< HEAD
 It uses MySQL to store metadata and the local filesystem to store actual object contents. The service runs independently of the main Repo2Cloud backend and identifies bucket ownership using numeric user IDs.
 
 ## Features
@@ -52,11 +53,18 @@ It uses MySQL to store metadata and the local filesystem to store actual object 
 - Allow different users to use identical bucket names.
 - Allow different users to store objects with identical keys independently.
 - Store objects in separate bucket-ID-based filesystem directories.
+=======
+- MySQL for bucket and object metadata
+- MinIO for actual object data
+- REST APIs providing S3-style bucket and object operations
+- XML responses and S3-style error responses
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 ---
 
 ## Tech Stack
 
+<<<<<<< HEAD
 | Technology | Purpose |
 |---|---|
 | Java 21 | Backend programming language |
@@ -68,6 +76,14 @@ It uses MySQL to store metadata and the local filesystem to store actual object 
 | Maven | Dependency management and build |
 | Local Filesystem | Object data storage |
 | XML | S3-style API responses |
+=======
+- Java 21
+- Spring Boot
+- Spring Data JPA
+- MySQL
+- Maven
+- MinIO Object Storage
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 ---
 
@@ -76,6 +92,7 @@ It uses MySQL to store metadata and the local filesystem to store actual object 
 The storage server runs as a separate service from the main Repo2Cloud backend.
 
 ```text
+<<<<<<< HEAD
                  +---------------------------+
                  |        Repo2Cloud         |
                  |      Main Backend         |
@@ -98,6 +115,25 @@ The storage server runs as a separate service from the main Repo2Cloud backend.
              |   Metadata    |   |  Object Data    |
              +---------------+   +----------------+
 ```
+=======
+                 +----------------------+
+                 |      Repo2Cloud     |
+                 +----------+-----------+
+                            |
+                            | S3 API
+                            v
+                 +----------------------+
+                 |   S3 Server :8081    |
+                 +----------+-----------+
+                            |
+                 +----------+-----------+
+                 |                      |
+                 v                      v
+        +----------------+     +----------------+
+        |     MySQL      |     | Local Storage  |
+        |   Metadata     |     | ./s3-storage/  |
+        +----------------+     +----------------+
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 ### MySQL stores
 - Bucket IDs and names.
@@ -113,7 +149,11 @@ The storage server runs as a separate service from the main Repo2Cloud backend.
 - Actual uploaded object contents.
 - Files organized by bucket ID and object key.
 
+<<<<<<< HEAD
 This separation allows MySQL to manage searchable metadata while the filesystem stores the actual bytes.
+=======
+The actual object contents are stored in MinIO physical buckets. MySQL stores the logical bucket and object metadata.
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 ---
 
@@ -180,6 +220,7 @@ Create your local configuration file by copying the example.
 Copy-Item src/main/resources/application-example.properties src/main/resources/application.properties
 ```
 
+<<<<<<< HEAD
 **Linux/macOS:**
 
 ```bash
@@ -204,15 +245,24 @@ Set your MySQL credentials before starting the application.
 $env:DB_USERNAME = "root"
 $env:DB_PASSWORD = "your-local-mysql-password"
 ```
+=======
+The application configuration should use environment variables for database and MinIO credentials. Copy `.env.example` to `.env`, set values locally, and never commit `.env`. The exact environment variable names must match the placeholders in your local `application.properties`.
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 Replace the example password with your actual local MySQL password.
 
 **Linux/macOS:**
 
+<<<<<<< HEAD
 ```bash
 export DB_USERNAME=root
 export DB_PASSWORD='your-local-mysql-password'
 ```
+=======
+server.port=8081
+minio.endpoint=http://localhost:9000
+Important
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 Do not commit real passwords, tokens, or other secrets to GitHub.
 
@@ -232,11 +282,20 @@ The local `application.properties` file is excluded from version control.
 ./mvnw spring-boot:run
 ```
 
+<<<<<<< HEAD
 The server starts at:
 
 ```text
 http://localhost:9000
 ```
+=======
+The Spring Boot API runs on:
+
+http://localhost:8081
+
+MinIO's API is expected at `http://localhost:9000` (its console is typically at `http://localhost:9001`).
+Building the Project
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 ### 5. Build the project
 
@@ -282,7 +341,186 @@ Instead, the main backend is responsible for authenticating the user and propaga
 
 ### Required Request Header
 
+<<<<<<< HEAD
 Every bucket and object API request requires:
+=======
+GET /my-bucket/test.txt
+Check Object
+HEAD /{bucket}/{objectKey}
+Delete Object
+DELETE /{bucket}/{objectKey}
+Object Listing
+
+List objects in a bucket:
+
+GET /{bucket}
+
+Example:
+
+GET /my-bucket
+Prefix
+GET /my-bucket?prefix=projects/
+Delimiter
+GET /my-bucket?delimiter=/
+Pagination
+GET /my-bucket?max-keys=2
+
+If more objects are available, the response provides a continuation token.
+
+The next request can use:
+
+GET /my-bucket?max-keys=2&continuation-token=<TOKEN>
+Range Requests
+
+The server supports HTTP Range requests for object downloads.
+
+Example:
+
+GET /my-bucket/video.mp4
+Range: bytes=0-1023
+
+The server returns the requested byte range when it is valid.
+
+Invalid ranges return an S3-style InvalidRange error.
+
+Storage Model
+
+The server separates metadata from object data.
+
+Example:
+
+s3-storage/
+â””â”€â”€ my-bucket/
+    â”œâ”€â”€ file.txt
+    â””â”€â”€ projects/
+        â””â”€â”€ 101/
+            â””â”€â”€ build.log
+
+The database stores metadata for these objects.
+
+This allows the server to use the filesystem for actual object storage while MySQL manages searchable metadata.
+
+Data Consistency
+
+Object uploads use temporary files before replacing the final object.
+
+The upload flow is approximately:
+
+Client
+   |
+   v
+Temporary File
+   |
+   | successful write
+   v
+Atomic Move
+   |
+   v
+Object Storage
+   |
+   v
+Metadata Update
+   |
+   v
+MySQL
+
+When overwriting an existing object, the previous object is temporarily backed up so that the server can restore it if the metadata update fails.
+
+This prevents the filesystem and database from becoming inconsistent during normal overwrite operations.
+
+Current Limitations
+
+This project currently focuses on the core S3-compatible object storage functionality required by Repo2Cloud.
+
+The following features are not currently implemented:
+
+AWS Signature Version 4 authentication
+Presigned URLs
+Object versioning
+Bucket versioning
+Access Control Lists (ACLs)
+Multipart uploads
+Distributed storage
+Replication
+Cloud-based object storage backends
+
+Authentication is intentionally not part of the current S3 server implementation.
+
+Repo2Cloud Integration
+
+The S3 server is designed to run as a separate service from the main Repo2Cloud application.
+
+Example:
+
++----------------------+
+|      Repo2Cloud      |
+|                      |
+| Deployment Platform  |
++----------+-----------+
+           |
+           | S3 API
+           |
+           v
++----------------------+
+|     S3 Server        |
+|     Port 9000        |
++----------+-----------+
+           |
+      +----+----+
+      |         |
+      v         v
+   MySQL    Filesystem
+
+Repo2Cloud can communicate with the server using its S3-style HTTP API.
+
+Default endpoint:
+
+http://localhost:9000
+Development
+
+Clone the repository:
+
+git clone https://github.com/vishwajeetkapurkar-crypto/repo2cloud-s3-server.git
+
+Enter the project:
+
+cd repo2cloud-s3-server
+
+Configure MySQL credentials:
+
+src/main/resources/application.properties
+
+Start the server:
+
+.\mvnw.cmd spring-boot:run
+Project Status
+
+Core S3-compatible server functionality is implemented and integration-tested.
+
+The server currently supports:
+
+Bucket CRUD
+Object CRUD
+Object metadata
+ETags
+Prefix listing
+Delimiter/CommonPrefixes
+Pagination
+Continuation tokens
+Range requests
+Atomic uploads
+Storage/metadata consistency
+S3-style errors
+Input validation
+
+The project is ready for integration with Repo2Cloud as a separate S3 storage service.
+
+## Repo2Cloud user isolation (numeric user ID)
+
+Every bucket belongs to a Repo2Cloud user identified by the numeric `Long` user ID from the main Repo2Cloud service. The storage service does not import the main service's `User` entity or connect to its user database. It stores the ID as a scalar `owner_id` metadata field.
+
+All bucket and object requests require this internal header:
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)
 
 ```http
 X-Repo2Cloud-User-Id: 101
@@ -384,6 +622,7 @@ PUT /my-project
 X-Repo2Cloud-User-Id: 101
 ```
 
+<<<<<<< HEAD
 Creates the `my-project` bucket for user `101`, provided that the user does not already own a bucket with that name.
 
 #### List buckets
@@ -812,3 +1051,21 @@ Verified functionality includes:
 The project is ready for continued development and integration with Repo2Cloud, subject to the security, testing, and deployment considerations described above.
 
 **Note:** A successful Maven build and manual API tests do not establish complete S3 compatibility or production readiness. Automated coverage, service authentication, operational monitoring, and failure-recovery testing should be expanded as the platform develops.
+=======
+The table should have the primary key on `id` and a composite unique constraint on `(owner_id, name)`, with no `owner_email` column. Existing object metadata and physical paths are preserved; objects remain associated with their bucket IDs.
+
+
+## Integration Tests
+
+Integration tests use a separate MySQL database named `repo2cloud_s3_test` and the MinIO instance configured for the test profile. Create that database before running tests. Configure `TEST_DB_USERNAME`, `TEST_DB_PASSWORD`, `MINIO_ROOT_USER`, and `MINIO_ROOT_PASSWORD` in your local environment. The test profile uses a unique physical bucket prefix per test application context to avoid collisions with buckets left by earlier runs. Do not point the test profile at production data.
+
+Windows PowerShell example:
+
+```powershell
+$env:TEST_DB_USERNAME = "your_mysql_username"
+$env:TEST_DB_PASSWORD = "your_test_database_password"
+$env:MINIO_ROOT_USER = "your_minio_user"
+$env:MINIO_ROOT_PASSWORD = "your_minio_password"
+.\mvnw.cmd -Dtest=ObjectServiceTest clean test
+```
+>>>>>>> 0a5a01a (Add MinIO-backed S3 storage and integration tests)

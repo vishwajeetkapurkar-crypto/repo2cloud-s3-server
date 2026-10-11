@@ -63,3 +63,8 @@ src/main/resources/application.properties
 
 # Local S3 object storage
 s3-storage/
+
+.env
+!.env.example
+# Local test output
+integration-error.txt
