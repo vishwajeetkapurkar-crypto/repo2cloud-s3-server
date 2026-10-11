@@ -23,9 +23,10 @@ public class BucketController {
 
     @PutMapping("/{bucketName}")
     public ResponseEntity<Bucket> createBucket(
-            @PathVariable String bucketName) {
+            @PathVariable String bucketName,
+            @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId) {
 
-        Bucket bucket = bucketService.createBucket(bucketName);
+        Bucket bucket = bucketService.createBucket(bucketName, ownerId);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
@@ -33,18 +34,20 @@ public class BucketController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Bucket>> getAllBuckets() {
+    public ResponseEntity<List<Bucket>> getAllBuckets(
+            @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId) {
 
         return ResponseEntity.ok(
-                bucketService.getAllBuckets()
+                bucketService.getAllBuckets(ownerId)
         );
     }
 
     @DeleteMapping("/{bucketName}")
     public ResponseEntity<Void> deleteBucket(
-            @PathVariable String bucketName) {
+            @PathVariable String bucketName,
+            @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId) {
 
-        bucketService.deleteBucket(bucketName);
+        bucketService.deleteBucket(bucketName, ownerId);
 
         return ResponseEntity.noContent().build();
     }
@@ -54,11 +57,10 @@ public class BucketController {
         method = RequestMethod.HEAD
 )
 public ResponseEntity<Void> headBucket(
-        @PathVariable String bucketName) {
+        @PathVariable String bucketName,
+        @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId) {
 
-    bucketService.getBucket(bucketName);
+    bucketService.getBucket(bucketName, ownerId);
 
     return ResponseEntity.ok().build();
-}
- 
-}
+}}

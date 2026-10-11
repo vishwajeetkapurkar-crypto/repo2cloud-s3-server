@@ -8,7 +8,10 @@ import java.time.LocalDateTime;
 @Table(
         name = "buckets",
         uniqueConstraints = {
-                @UniqueConstraint(columnNames = "name")
+                @UniqueConstraint(
+                        name = "uk_bucket_owner_name",
+                        columnNames = {"owner_id", "name"}
+                )
         }
 )
 public class Bucket {
@@ -17,8 +20,11 @@ public class Bucket {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String name;
+
+    @Column(name = "owner_id", nullable = false)
+    private Long ownerId;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
@@ -26,8 +32,9 @@ public class Bucket {
     public Bucket() {
     }
 
-    public Bucket(String name) {
+    public Bucket(String name, Long ownerId) {
         this.name = name;
+        this.ownerId = ownerId;
         this.createdAt = LocalDateTime.now();
     }
 
@@ -41,6 +48,14 @@ public class Bucket {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public Long getOwnerId() {
+        return ownerId;
+    }
+
+    public void setOwnerId(Long ownerId) {
+        this.ownerId = ownerId;
     }
 
     public LocalDateTime getCreatedAt() {

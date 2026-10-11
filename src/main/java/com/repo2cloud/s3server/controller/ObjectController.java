@@ -38,6 +38,7 @@ public class ObjectController {
    @GetMapping("/{bucketName}/**")
 public ResponseEntity<Resource> downloadObject(
         @PathVariable String bucketName,
+        @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId,
         @RequestHeader(
                 value = "Range",
                 required = false
@@ -64,6 +65,7 @@ public ResponseEntity<Resource> downloadObject(
 
     ObjectDownload download =
             objectService.downloadObject(
+                    ownerId,
                     bucketName,
                     objectKey
             );
@@ -91,6 +93,7 @@ public ResponseEntity<Resource> downloadObject(
 }
 StoredObject object =
         objectService.headObject(
+                ownerId,
                 bucketName,
                 objectKey
         );
@@ -103,6 +106,7 @@ StoredObject object =
 
         ObjectDownload download =
         objectService.downloadObjectRange(
+                ownerId,
                 bucketName,
                 objectKey,
                 byteRange.getStart(),
@@ -144,6 +148,7 @@ StoredObject object =
 @DeleteMapping("/{bucketName}/**")
 public ResponseEntity<Void> deleteObject(
         @PathVariable String bucketName,
+        @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId,
         HttpServletRequest request) {
 
     String requestPath = request.getRequestURI();
@@ -163,6 +168,7 @@ public ResponseEntity<Void> deleteObject(
 }
 
     objectService.deleteObject(
+            ownerId,
             bucketName,
             objectKey
     );
@@ -176,7 +182,8 @@ public ResponseEntity<Void> deleteObject(
 )
 public ResponseEntity<Void> headObject(
         @PathVariable String bucketName,
-        @PathVariable String objectKey) {
+        @PathVariable String objectKey,
+        @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId) {
 
                 if (!ObjectKeyValidator.isValid(objectKey)) {
     throw new InvalidObjectKeyException(
@@ -187,6 +194,7 @@ public ResponseEntity<Void> headObject(
 
     StoredObject object =
             objectService.headObject(
+                    ownerId,
                     bucketName,
                     objectKey
             );
@@ -214,6 +222,7 @@ public ResponseEntity<Void> headObject(
 )
 public ResponseEntity<S3ListBucketResult> listObjects(
         @PathVariable String bucketName,
+        @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId,
 
         @RequestParam(
                 value = "prefix",
@@ -244,6 +253,7 @@ public ResponseEntity<S3ListBucketResult> listObjects(
 
    ListObjectsResponse response =
         objectService.listObjects(
+                ownerId,
                 bucketName,
                 prefix,
                 delimiter,
@@ -272,6 +282,7 @@ public ResponseEntity<S3ListBucketResult> listObjects(
   @PutMapping("/{bucketName}/**")
 public ResponseEntity<StoredObject> uploadObject(
         @PathVariable String bucketName,
+        @RequestHeader("X-Repo2Cloud-User-Id") Long ownerId,
         @RequestHeader(
                 value = "Content-Type",
                 required = false
@@ -289,6 +300,7 @@ public ResponseEntity<StoredObject> uploadObject(
 
     StoredObject storedObject =
             objectService.uploadObject(
+                    ownerId,
                     bucketName,
                     objectKey,
                     request.getInputStream(),

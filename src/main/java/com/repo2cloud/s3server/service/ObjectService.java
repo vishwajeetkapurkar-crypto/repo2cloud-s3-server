@@ -18,6 +18,8 @@ import com.repo2cloud.s3server.validation.ObjectKeyValidator;
 
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -52,10 +54,12 @@ public class ObjectService {
     // ============================================================
 
     public ObjectDownload downloadObject(
+            Long ownerId,
             String bucketName,
             String objectKey) {
 
-        Bucket bucket = bucketRepository.findByName(bucketName)
+        ownerId = validateOwnerId(ownerId);
+        Bucket bucket = bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
                 .orElseThrow(() ->
                         new BucketNotFoundException(
                                 "Bucket not found: " + bucketName
@@ -99,10 +103,12 @@ public class ObjectService {
     // ============================================================
 
     public StoredObject headObject(
+            Long ownerId,
             String bucketName,
             String objectKey) {
 
-        Bucket bucket = bucketRepository.findByName(bucketName)
+        ownerId = validateOwnerId(ownerId);
+        Bucket bucket = bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
                 .orElseThrow(() ->
                         new BucketNotFoundException(
                                 "Bucket not found: " + bucketName
@@ -126,10 +132,12 @@ public class ObjectService {
     // ============================================================
 
     public void deleteObject(
+            Long ownerId,
             String bucketName,
             String objectKey) {
 
-        Bucket bucket = bucketRepository.findByName(bucketName)
+        ownerId = validateOwnerId(ownerId);
+        Bucket bucket = bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
                 .orElseThrow(() ->
                         new BucketNotFoundException(
                                 "Bucket not found: " + bucketName
@@ -164,13 +172,15 @@ public class ObjectService {
     // ============================================================
 
     public ListObjectsResponse listObjects(
+            Long ownerId,
             String bucketName,
             String prefix,
             String delimiter,
             int maxKeys,
             String continuationToken) {
 
-        Bucket bucket = bucketRepository.findByName(bucketName)
+        ownerId = validateOwnerId(ownerId);
+        Bucket bucket = bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
                 .orElseThrow(() ->
                         new BucketNotFoundException(
                                 "Bucket not found: " + bucketName
@@ -402,12 +412,14 @@ public class ObjectService {
     // ============================================================
 
     public ObjectDownload downloadObjectRange(
+            Long ownerId,
             String bucketName,
             String objectKey,
             long start,
             long length) {
 
-        Bucket bucket = bucketRepository.findByName(bucketName)
+        ownerId = validateOwnerId(ownerId);
+        Bucket bucket = bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
                 .orElseThrow(() ->
                         new BucketNotFoundException(
                                 "Bucket not found: " + bucketName
@@ -454,11 +466,13 @@ public class ObjectService {
     // ============================================================
 
     public StoredObject uploadObject(
+            Long ownerId,
             String bucketName,
             String objectKey,
             InputStream inputStream,
             String contentType) {
 
+        ownerId = validateOwnerId(ownerId);
         /*
          * Validate object key before doing any filesystem
          * or database operation.
@@ -475,7 +489,7 @@ public class ObjectService {
          * Make sure bucket exists.
          */
         Bucket bucket =
-                bucketRepository.findByName(bucketName)
+                bucketRepository.findByNameAndOwnerId(bucketName, ownerId)
                         .orElseThrow(() ->
                                 new BucketNotFoundException(
                                         "Bucket not found: "
@@ -530,7 +544,7 @@ public class ObjectService {
                  */
                 uploadResult =
         localFileStorage.saveObject(
-                bucketName,
+                bucket.getId().toString(),
                 objectKey,
                 inputStream
         );
@@ -622,7 +636,7 @@ public class ObjectService {
 
         StreamingUploadResult uploadResult =
                 localFileStorage.saveObject(
-                        bucketName,
+                        bucket.getId().toString(),
                         objectKey,
                         inputStream
                 );
@@ -698,5 +712,15 @@ public class ObjectService {
 
             throw e;
         }
+    }
+
+    private Long validateOwnerId(Long ownerId) {
+        if (ownerId == null || ownerId <= 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "A positive Repo2Cloud user ID is required in X-Repo2Cloud-User-Id."
+            );
+        }
+        return ownerId;
     }
 }

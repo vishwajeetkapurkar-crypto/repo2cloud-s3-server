@@ -127,11 +127,14 @@ src/main/resources/application.properties
 Windows PowerShell
 Copy-Item src/main/resources/application-example.properties src/main/resources/application.properties
 
-Then update the MySQL credentials:
+The application reads database credentials from environment variables. In Windows PowerShell, set them before running:
 
-spring.datasource.url=jdbc:mysql://localhost:3306/repo2cloud_s3
-spring.datasource.username=YOUR_MYSQL_USERNAME
-spring.datasource.password=YOUR_MYSQL_PASSWORD
+```powershell
+$env:DB_USERNAME = "root"
+$env:DB_PASSWORD = "your-local-mysql-password"
+```
+
+Use your actual local MySQL credentials. Do not paste real passwords into source files or commit them.
 
 The default server configuration is:
 
@@ -374,3 +377,74 @@ S3-style errors
 Input validation
 
 The project is ready for integration with Repo2Cloud as a separate S3 storage service.
+
+## Repo2Cloud user isolation (numeric user ID)
+
+Every bucket belongs to a Repo2Cloud user identified by the numeric `Long` user ID from the main Repo2Cloud service. The storage service does not import the main service's `User` entity or connect to its user database. It stores the ID as a scalar `owner_id` metadata field.
+
+All bucket and object requests require this internal header:
+
+```http
+X-Repo2Cloud-User-Id: 101
+```
+
+Replace `101` with the authenticated user's actual ID. The same logical bucket name and object key can exist for different user IDs because ownership is checked against the bucket record and objects are stored in the bucket-ID namespace.
+
+**Security requirement:** the header is identity propagation, not authentication. The main Repo2Cloud backend must derive the ID from its authenticated security principal, overwrite/strip any client-supplied header, and call the storage service through a trusted server-to-server path. Do not expose port 9000 directly to untrusted clients. Restrict network access and add service authentication (for example, mTLS or a signed internal token) before production deployment.
+
+## Database configuration
+
+Set `DB_USERNAME` and `DB_PASSWORD` as environment variables before starting the application. Do not commit database credentials.
+
+### Migrating an existing email-owned development database
+
+**Back up the database first and stop the storage application during the migration.** Hibernate `ddl-auto=update` is not a schema migration tool and cannot decide which numeric Repo2Cloud user ID owns each old bucket.
+
+First inspect the existing records:
+
+```sql
+USE repo2cloud_s3;
+SELECT id, name, owner_email FROM buckets ORDER BY id;
+```
+
+Add the new column:
+
+```sql
+ALTER TABLE buckets ADD COLUMN owner_id BIGINT NULL;
+```
+
+Populate `owner_id` using the actual IDs from the main Repo2Cloud `users` table. The following is an example only: replace `101` and `202` with the actual IDs for these emails in your main server, and add mappings for every existing owner email in your database.
+
+```sql
+UPDATE buckets SET owner_id = 101 WHERE owner_email = 'user1@example.com';
+UPDATE buckets SET owner_id = 202 WHERE owner_email = 'user2@example.com';
+```
+
+For any legacy/test email that does not correspond to a real main-server user, choose the correct owner ID for that data or delete the test bucket and its objects if they are no longer needed. Do not assign all existing rows the same arbitrary ID unless they should all belong to that user.
+
+Verify that every row was mapped before proceeding:
+
+```sql
+SELECT id, name, owner_email FROM buckets WHERE owner_id IS NULL;
+SELECT id, name, owner_id FROM buckets ORDER BY id;
+```
+
+The first query must return zero rows. Then create the new uniqueness constraint and remove the old email-based one. If the current index names match the names observed in the previous development schema, run:
+
+```sql
+ALTER TABLE buckets MODIFY owner_id BIGINT NOT NULL;
+ALTER TABLE buckets DROP INDEX UKq9reum2aeiw6ypv6tuhvroh9;
+ALTER TABLE buckets ADD CONSTRAINT uk_bucket_owner_name UNIQUE (owner_id, name);
+ALTER TABLE buckets DROP COLUMN owner_email;
+```
+
+**Index-name warning:** `UKq9reum2aeiw6ypv6tuhvroh9` is the name reported by one development database. Before dropping it, run `SHOW INDEX FROM buckets;` and confirm the index covers `owner_email` and `name`. If your database uses a different index name, substitute the actual name. Do not drop the primary key. The old global unique index on `name` should already have been removed; if not, identify and drop that specific old index as well, otherwise two users still cannot create same-named buckets.
+
+Finally verify:
+
+```sql
+SHOW INDEX FROM buckets;
+SELECT id, name, owner_id FROM buckets ORDER BY id;
+```
+
+The table should have the primary key on `id` and a composite unique constraint on `(owner_id, name)`, with no `owner_email` column. Existing object metadata and physical paths are preserved; objects remain associated with their bucket IDs.
